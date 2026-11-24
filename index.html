@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Room 17 — Номер до приезда</title>
+<link rel="stylesheet" href="style.css">
+<script src="game.js" defer></script>
+<script src="live.js" defer></script>
+</head>
+<body>
+<header><div><p class="brand">СЕВЕРНАЯ ЗВЕЗДА</p><h1>Номер до приезда</h1></div><span>ROOM 17</span></header>
+<main>
+<section class="scene" id="scene">
+  <div class="scene-card">
+    <p class="eyebrow" id="location"></p>
+    <h2 id="heading"></h2>
+    <p id="description"></p>
+    <p id="investigation-hint" aria-live="polite" hidden></p>
+    <div id="actions" class="actions"></div>
+  </div>
+</section>
+<aside>
+  <section id="dialogue" class="dialogue" aria-labelledby="speaker">
+    <div id="portrait" class="portrait" role="img"></div>
+    <div class="speech" aria-live="polite">
+      <h2 id="speaker">Метрдотель</h2>
+      <p id="expression" class="eyebrow"></p>
+      <p id="line"></p>
+    </div>
+    <div id="questions" class="actions"></div>
+    <form id="live-dialogue" hidden>
+      <label for="live-question">Свой вопрос Корневу</label>
+      <div class="live-input">
+        <input id="live-question" maxlength="350" required placeholder="Задай вопрос своими словами">
+        <button type="submit">Спросить</button>
+      </div>
+      <p id="live-status" role="status" hidden></p>
+    </form>
+  </section>
+  <section class="notebook" aria-labelledby="notes-title">
+    <h2 id="notes-title">Блокнот</h2>
+    <ul id="notes" aria-live="polite" aria-labelledby="notes-title" tabindex="0"></ul>
+  </section>
+</aside>
+</main>
+<footer><button id="restart" type="button" hidden>Начать заново</button></footer>
+<dialog id="comparison" aria-labelledby="comparison-title">
+  <h2 id="comparison-title">Сопоставить записи</h2>
+  <form id="comparison-form">
+    <fieldset>
+      <legend>Выбери две улики из блокнота</legend>
+      <div id="comparison-evidence"></div>
+    </fieldset>
+    <p id="comparison-result" role="status"></p>
+    <div class="actions">
+      <button type="submit">Сопоставить</button>
+      <button type="submit" formmethod="dialog">Вернуться к журналу</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>
