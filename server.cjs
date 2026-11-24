@@ -3,6 +3,7 @@
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { createAir, createAirControl } = require("./air.cjs");
 
 const files = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -66,33 +67,35 @@ function json(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function createServer({ apiKey, fetchImpl = fetch } = {}) {
+function createServer({ apiKey, fetchImpl = fetch, publicOrigin, air } = {}) {
   return http.createServer(async (request, response) => {
     const localHost = "127.0.0.1:" + request.socket.localPort;
-    if (request.headers.host !== localHost) {
+    if (request.headers.host !== localHost && request.headers.host !== publicOrigin?.host) {
       return json(response, 403, { error: "Local game host required" });
     }
     const pathname = request.url.split("?")[0];
     if (request.method === "GET" && pathname === "/api/status") {
-      return json(response, 200, { enabled: Boolean(apiKey) });
+      return json(response, 200, air ? air.status() : { enabled: Boolean(apiKey) });
     }
 
     if (request.method === "POST" && pathname === "/api/kornev") {
+      if (air && !air.status().enabled) return json(response, 503, { error: "air_closed" });
       if (!apiKey) return json(response, 503, { error: "Live dialogue disabled" });
       if (request.headers["content-type"] !== "application/json" ||
-          request.headers.origin !== "http://" + localHost) {
+          request.headers.origin !== (publicOrigin?.origin ?? "http://" + localHost)) {
         return json(response, 403, { error: "Local game origin required" });
       }
       let body = "";
       request.setEncoding("utf8");
       let question;
       let discovered;
+      let airEpoch;
       try {
         for await (const chunk of request) {
           body += chunk;
           if (body.length > 4096) return json(response, 413, { error: "Question too large" });
         }
-        ({ question, discovered } = JSON.parse(body) ?? {});
+        ({ question, discovered, airEpoch } = JSON.parse(body) ?? {});
       } catch {
         return json(response, 400, { error: "Invalid JSON" });
       }
@@ -104,6 +107,8 @@ function createServer({ apiKey, fetchImpl = fetch } = {}) {
       }
       const found = new Set(discovered);
       const facts = Object.entries(revealedFacts).filter(([id]) => found.has(id)).map(([, fact]) => fact);
+      const reservation = air?.reserve(airEpoch);
+      if (air && !reservation) return json(response, 503, { error: "air_closed" });
       try {
         const upstream = await fetchImpl("https://api.openai.com/v1/responses", {
           method: "POST",
@@ -114,15 +119,19 @@ function createServer({ apiKey, fetchImpl = fetch } = {}) {
             instructions: instructions + "\nРаскрытые сведения:\n" + facts.map(fact => "- " + fact).join("\n"),
             input: question.trim()
           }),
-          signal: AbortSignal.timeout(15000)
+          signal: reservation
+            ? AbortSignal.any([AbortSignal.timeout(15000), reservation.signal])
+            : AbortSignal.timeout(15000)
         });
         if (!upstream.ok) return json(response, 502, { error: "Live reply unavailable" });
         const result = await upstream.json();
+        if (reservation && !reservation.isCurrent()) return json(response, 503, { error: "air_closed" });
         const reply = (result.output ?? []).flatMap(item => item.content ?? [])
           .filter(part => part.type === "output_text").map(part => part.text).join("").trim();
         if (!reply || reply.length > 400) return json(response, 502, { error: "Invalid live reply" });
         return json(response, 200, { reply: outOfCharacter.test(reply) ? redirectReply : reply });
       } catch {
+        if (reservation && !reservation.isCurrent()) return json(response, 503, { error: "air_closed" });
         return json(response, 502, { error: "Live reply unavailable" });
       }
     }
@@ -140,8 +149,17 @@ function createServer({ apiKey, fetchImpl = fetch } = {}) {
 }
 
 if (require.main === module) {
-  createServer({ apiKey: process.env.ROOM17_OPENAI_API_KEY }).listen(4318, "127.0.0.1", () => {
-    console.log("Room 17: http://127.0.0.1:4318");
+  const apiKey = process.env.ROOM17_OPENAI_API_KEY;
+  const origin = process.env.ROOM17_PUBLIC_ORIGIN;
+  const port = Number(process.env.ROOM17_PORT ?? 4318);
+  const air = origin ? createAir({ hasKey: Boolean(apiKey) }) : undefined;
+  if (air) {
+    const token = process.env.ROOM17_AIR_TOKEN;
+    if (!token || !process.env.ROOM17_AIR_PORT) throw new Error("Air control configuration is missing");
+    createAirControl(air, token).listen(Number(process.env.ROOM17_AIR_PORT), "127.0.0.1");
+  }
+  createServer({ apiKey, publicOrigin: origin ? new URL(origin) : undefined, air }).listen(port, "127.0.0.1", () => {
+    console.log("Room 17: http://127.0.0.1:" + port);
   });
 }
 

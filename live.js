@@ -4,17 +4,32 @@ const liveForm = byId("live-dialogue");
 const liveInput = byId("live-question");
 const liveStatus = byId("live-status");
 const liveButton = liveForm.querySelector("button");
+let airEpoch;
 
 function showLiveStatus(message) {
   liveStatus.textContent = message;
   liveStatus.hidden = !message;
 }
 
-if (location.protocol === "http:") {
-  fetch("/api/status").then(response => response.json()).then(({ enabled }) => {
-    window.kornevLiveAvailable = enabled === true;
+async function refreshAir() {
+  let enabled = false;
+  try {
+    const response = await fetch("/api/status", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+    if (response.ok) {
+      const status = await response.json();
+      enabled = status.enabled === true;
+      airEpoch = status.epoch;
+    }
+  } catch {}
+  if (Boolean(window.kornevLiveAvailable) !== enabled) {
+    window.kornevLiveAvailable = enabled;
     render();
-  }).catch(() => {});
+  }
+}
+
+if (location.protocol === "https:" || location.protocol === "http:") {
+  refreshAir();
+  setInterval(refreshAir, 10000);
 }
 
 liveForm.addEventListener("submit", async event => {
@@ -30,9 +45,14 @@ liveForm.addEventListener("submit", async event => {
     const response = await fetch("/api/kornev", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, discovered: [...state.clues].filter(id => typeof id === "string") }),
+      body: JSON.stringify({ question, airEpoch, discovered: [...state.clues].filter(id => typeof id === "string") }),
       signal: AbortSignal.timeout(20000)
     });
+    if (response.status === 503 && (await response.json()).error === "air_closed") {
+      showLiveStatus("Luna сейчас вне эфира.");
+      await refreshAir();
+      return;
+    }
     if (!response.ok) throw new Error("Live reply failed");
     const { reply } = await response.json();
     if (typeof reply !== "string" || !reply.trim()) throw new Error("Empty reply");
